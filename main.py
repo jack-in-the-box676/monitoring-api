@@ -1,3 +1,4 @@
+
 import json
 import os
 import sqlite3
@@ -11,6 +12,16 @@ DB_PATH = os.getenv("DB_PATH", "/data/monitoring.db")
 API_KEY = os.getenv("API_KEY", "")
 
 STALE_AFTER = timedelta(hours=24)
+WEEKLY_STALE_AFTER = timedelta(days=8)
+
+WEEKLY_CHECK_IDS = {
+    "docker01_containers",
+    "docker01_updates",
+    "pbs_updates",
+    "pfsense_updates",
+    "proxmox_updates",
+    "synology_updates",
+}
 
 app = FastAPI(title="Homelab Monitoring API")
 
@@ -70,7 +81,6 @@ def get_check_age(checked_at: str):
             return "just now"
 
         minutes = total_seconds // 60
-
         if minutes < 60:
             return f"{minutes} min ago"
 
@@ -90,7 +100,11 @@ def get_check_age(checked_at: str):
         return "unknown"
 
 
-def get_effective_status(status: str, checked_at: str):
+def get_effective_status(
+    status: str,
+    checked_at: str,
+    check_id: str,
+):
     try:
         checked = datetime.fromisoformat(checked_at)
 
@@ -99,7 +113,13 @@ def get_effective_status(status: str, checked_at: str):
 
         age = datetime.now(timezone.utc) - checked
 
-        if age > STALE_AFTER:
+        stale_after = (
+            WEEKLY_STALE_AFTER
+            if check_id in WEEKLY_CHECK_IDS
+            else STALE_AFTER
+        )
+
+        if age > stale_after:
             return "UNKNOWN", True
 
     except (ValueError, TypeError):
@@ -120,6 +140,7 @@ def row_to_check(row, include_details=True):
     status, stale = get_effective_status(
         row["status"],
         row["checked_at"],
+        row["id"],
     )
 
     result = {
@@ -166,6 +187,7 @@ def get_status():
         status, stale = get_effective_status(
             row["status"],
             row["checked_at"],
+            row["id"],
         )
 
         result.append({
